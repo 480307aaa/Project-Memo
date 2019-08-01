@@ -1,0 +1,10 @@
+1：项目地址ssh://git@outergit.yonyou.com:49622/esn_app/microservice-uspace-api.git
+
+2：打包脚本，到项目根目录下 gradlew  build -x test
+
+3. 到microservice-uspace-api\uspace-impl\build\libs下将 uspace-impl.war包拷贝到新容器
+
+4. 在新容器中启动此war包即可(启停脚本与轻应用待办一致即可)， 不需nginx配置转发（java -jar uspace-impl.war）
+
+
+
