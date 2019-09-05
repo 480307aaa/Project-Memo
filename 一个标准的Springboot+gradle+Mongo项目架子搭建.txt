@@ -1,0 +1,625 @@
+项目整个结构主要分成以下几个部分：
+根目录-
+      ---configuration：相关application.yml文件的相关配置
+	  ---data：dao层的实现以及DO层的实体类
+	  ---domain：定义一些枚举等结构
+	  ---error：定义一些异常和错误出现的情况
+	  ---service:接口和对应的实现
+	     ----impl
+		 ----pojo：一些VO实体类，也就是DO的对应映射
+	  ---support：swagger的相关配置
+	  ---web
+	     ----config
+		 ----rest
+		     ------client：客户端相关接口
+			 ------management：管理相关接口
+			 ------server:后台相关接口
+一：configuration(相关代码示例)
+
+package com.yonyoucloud.ec.sns.confidential.meeting.configuration;
+
+import com.yonyoucloud.ec.sns.starter.core.module.AbstractApplicationProperties;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.NestedConfigurationProperty;
+import org.springframework.context.annotation.Configuration;
+
+/**
+ * @author braveliu
+ */
+@Data
+@Configuration
+@EqualsAndHashCode(callSuper = true)
+@ConfigurationProperties("yonyoucloud.upesn.example")
+public class ApplicationProperties extends AbstractApplicationProperties {
+
+    private String rootPropName;
+
+    @NestedConfigurationProperty
+    private NestedConfiguration example;
+
+
+    @Data
+    public static class NestedConfiguration {
+        private String propName;
+    }
+
+}
+
+package com.yonyoucloud.ec.sns.starter.core.module;
+
+import com.yonyoucloud.ec.sns.error.ECConfigurationException;
+import org.apache.commons.lang3.StringUtils;
+
+import java.util.Collections;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+/**
+ * @author liuhaoi
+ */
+public class AbstractApplicationProperties {
+
+    public static final char URL_SPLIT_CHAT = '/';
+
+    public Set<String> parseCommaSplitParam(String source) {
+
+        if (StringUtils.isBlank(source)) {
+            return Collections.emptySet();
+        }
+
+        String[] split = source.split(",");
+
+        return Stream.of(split).map(String::trim).filter(StringUtils::isNotBlank).collect(Collectors.toSet());
+    }
+
+    public StringBuilder concatUrl(String urlPrefix, String... urlFragment) {
+        if (urlPrefix == null) {
+            throw new ECConfigurationException("invalid url prefix, can not be null");
+        }
+        StringBuilder builder = new StringBuilder(urlPrefix);
+
+        for (String fragment : urlFragment) {
+            concatURLFragment(builder, fragment);
+        }
+        return builder;
+    }
+
+
+    public String concatURL(String urlPrefix, String... urlFragment) {
+        return concatUrl(urlPrefix, urlFragment).toString();
+    }
+
+    private void concatURLFragment(StringBuilder builder, String fragment) {
+
+        if (StringUtils.isBlank(fragment)) {
+            return;
+        }
+
+        if (fragment.length() == 1 && fragment.charAt(0) == URL_SPLIT_CHAT) {
+            return;
+        }
+
+        String trimFragment = fragment.trim();
+
+        //参数之后
+        if (builder.indexOf("?") != -1) {
+            builder.append(trimFragment);
+            return;
+        }
+
+        if (trimFragment.startsWith("?")) {
+            builder.append(trimFragment);
+            return;
+        }
+
+        concatPaths(builder, trimFragment);
+    }
+
+    private void concatPaths(StringBuilder builder, String trimFragment) {
+        char c1 = builder.charAt(builder.length() - 1);
+
+        char c2 = trimFragment.charAt(0);
+
+        if (c1 == URL_SPLIT_CHAT && c2 == URL_SPLIT_CHAT) {
+            builder.append(trimFragment.substring(1));
+            return;
+        }
+
+        if (c1 == URL_SPLIT_CHAT || c2 == URL_SPLIT_CHAT) {
+            builder.append(trimFragment);
+            return;
+        }
+
+        builder.append(URL_SPLIT_CHAT).append(trimFragment);
+    }
+
+
+}
+
+二：data
+MeetingDeviceRepository:
+
+package com.yonyoucloud.ec.sns.confidential.meeting.data;
+
+import com.yonyoucloud.ec.sns.confidential.meeting.data.pojo.MeetingDeviceDO;
+
+import java.util.List;
+
+/**
+ * 会议设备数据库操作类
+
+ */
+public interface MeetingDeviceRepository {
+
+    /**
+     * 新增设备
+     *
+     * @param device 设备
+     * @return 邮件
+     */
+    MeetingDeviceDO save(MeetingDeviceDO device);
+
+    /**
+     * 修改设备
+     *
+     * @param device 设备
+     * @return 影响记录数
+     */
+    MeetingDeviceDO update(MeetingDeviceDO device);
+
+    MeetingDeviceDO updateIndex(MeetingDeviceDO device);
+    /**
+     * 删除设备
+     *
+     * @param id       设备id
+     * @return 影响记录数
+     */
+    MeetingDeviceDO deleteDevice(String id);
+
+    /**
+     * 查询邮件
+     *
+     * @param qzId 空间id
+     * @return 邮件
+     */
+    List<MeetingDeviceDO> queryByQzId(Integer qzId);
+
+    MeetingDeviceDO queryMaxIndexDeviceByQzId(Integer qzId);
+}
+以及：MeetingDeviceRepositoryImpl
+
+package com.yonyoucloud.ec.sns.confidential.meeting.data.impl;
+
+import com.yonyoucloud.ec.sns.confidential.meeting.data.MeetingDeviceRepository;
+import com.yonyoucloud.ec.sns.confidential.meeting.data.pojo.MeetingDeviceDO;
+import com.yonyoucloud.ec.sns.starter.core.support.db.mongodb.AbstractMongoRepository;
+import lombok.experimental.FieldNameConstants;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.stereotype.Repository;
+
+import java.util.Comparator;
+import java.util.List;
+
+/**
+ * 
+ */
+@Slf4j
+@Repository
+public class MeetingDeviceRepositoryImpl extends AbstractMongoRepository<MeetingDeviceDO> implements MeetingDeviceRepository {
+
+    public MeetingDeviceRepositoryImpl(MongoTemplate template) {
+        super(MeetingDeviceDO.class, template);
+    }
+
+    @Override
+    public MeetingDeviceDO save(MeetingDeviceDO device) {
+
+        device.setDefaultAttr();
+
+        template.save(device);
+
+        return device;
+    }
+
+    @Override
+    public MeetingDeviceDO update(MeetingDeviceDO device) {
+
+        device.setUtime(System.currentTimeMillis());
+        Query query = Query.query(Criteria.where(MeetingDeviceDO.FIELD_ID).is(device.getId()));
+        Update update = new Update();
+        update.set(MeetingDeviceDO.FIELD_DEVICE_NAME, device.getDeviceName());
+        update.set(MeetingDeviceDO.FIELD_NOTE, device.getNote());
+        return template.findAndModify(query, update, MeetingDeviceDO.class);
+    }
+
+    public MeetingDeviceDO updateIndex(MeetingDeviceDO device) {
+
+        Query query = Query.query(Criteria.where(MeetingDeviceDO.FIELD_ID).is(device.getId()));
+        Update update = Update.update(MeetingDeviceDO.FIELD_INDEX, device.getIndex());
+        update.set(MeetingDeviceDO.FIELD_UTIME, System.currentTimeMillis());
+        return template.findAndModify(query, update, MeetingDeviceDO.class);
+    }
+    @Override
+    public MeetingDeviceDO deleteDevice(String id) {
+
+        Query query = Query.query(Criteria.where(MeetingDeviceDO.FIELD_ID).is(id));
+
+        Update update = Update.update(MeetingDeviceDO.FIELD_DR, true);
+
+        return template.findAndModify(query, update, MeetingDeviceDO.class);
+
+    }
+
+    @Override
+    public List<MeetingDeviceDO> queryByQzId(Integer qzId) {
+        Query query = Query.query(Criteria.where(MeetingDeviceDO.FIELD_QZ_ID).is(qzId));
+        query.addCriteria(Criteria.where(MeetingDeviceDO.FIELD_DR).is(false));
+        return template.find(query, MeetingDeviceDO.class);
+    }
+
+    @Override
+    public MeetingDeviceDO queryMaxIndexDeviceByQzId(Integer qzId) {
+        Query query = Query.query(Criteria.where(MeetingDeviceDO.FIELD_QZ_ID).is(qzId));
+        List<MeetingDeviceDO> res = template.find(query, MeetingDeviceDO.class);
+
+        if (res.isEmpty()) {
+            return null;
+        }
+
+        res.sort(Comparator.comparing(MeetingDeviceDO::getIndex).reversed());
+        return res.get(0);
+    }
+
+}
+里面用到的XXXDO也是在data层定义（分层的好处）
+
+三：domain(定义一些枚举等结构)
+
+四：error（定义一些异常或者错误出现的情况，有错误信息和状态码）
+package com.yonyoucloud.ec.sns.confidential.meeting.error;
+
+import com.yonyoucloud.ec.sns.error.ECIllegalArgumentException;
+
+public class ECResourceAlreadyExistsException extends ECIllegalArgumentException {
+
+    public ECResourceAlreadyExistsException(String message) {
+        super(message);
+    }
+
+    public ECResourceAlreadyExistsException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    @Override
+    public int getCode() {
+        return 40011;
+    }
+}
+
+
+package com.yonyoucloud.ec.sns.error;
+
+import com.yonyoucloud.ec.sns.error.common.ECErrorCode;
+
+/**
+ * 
+ */
+public class ECIllegalArgumentException extends ECException {
+
+    public ECIllegalArgumentException(String message) {
+        super(message);
+    }
+
+    public ECIllegalArgumentException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    @Override
+    public int getCode() {
+        return ECErrorCode.ILLEGAL_ARGUMENT;
+    }
+
+}
+
+
+package com.yonyoucloud.ec.sns.error;
+
+import java.util.HashMap;
+import java.util.Locale;
+import java.util.Map;
+
+/**
+ * @author liuhaoi
+ */
+public abstract class ECException extends RuntimeException {
+
+    public ECException(String message) {
+        super(message);
+    }
+
+    public ECException(String message, Throwable cause) {
+        super(message, cause);
+    }
+
+    /**
+     * 错误码,分配详情见{@link com.yonyoucloud.ec.sns.error.common.ECErrorCode}
+     *
+     * @return 错误码
+     */
+    public abstract int getCode();
+
+    /**
+     * 获取http的错误code
+     *
+     * @return http错误码
+     */
+    public final int getHttpCode() {
+
+        int code = getCode();
+
+        if (code > 9999999) {
+            return code / 100000;
+        }
+
+        if (code > 999999) {
+            return code / 10000;
+        }
+
+        if (code > 99999) {
+            return code / 1000;
+        }
+
+        if (code > 9999) {
+            return code / 100;
+        }
+
+        if (code > 1000) {
+            return code / 10;
+        }
+        return code;
+    }
+
+    public Map<Locale, String> getDisplayMessage() {
+        Map<Locale, String> message = new HashMap<>(3);
+
+        if (getHttpCode() > 499) {
+            message.put(Locale.SIMPLIFIED_CHINESE, "系统发生错误");
+            message.put(Locale.TRADITIONAL_CHINESE, "系統發生錯誤");
+            message.put(Locale.US, "System Error.");
+        } else if (getHttpCode() > 399) {
+            message.put(Locale.SIMPLIFIED_CHINESE, "参数错误");
+            message.put(Locale.TRADITIONAL_CHINESE, "參數錯誤");
+            message.put(Locale.US, "Parameter Invalid.");
+        }
+
+        return message;
+    }
+
+}
+
+五：service（具体接口和其实现）
+
+MeetingDeviceService
+
+
+package com.yonyoucloud.ec.sns.confidential.meeting.service;
+
+import com.yonyoucloud.ec.sns.confidential.meeting.data.pojo.MeetingDeviceDO;
+import com.yonyoucloud.ec.sns.confidential.meeting.service.pojo.MeetingDeviceVO;
+
+import java.util.List;
+
+/**
+ * 会议需求项目service
+ *
+ * @author lianghchf
+ */
+public interface MeetingDeviceService {
+
+    /**
+     * 查询设备
+     *
+     * @param qzId     空间ID
+     * @return 设备列表
+     */
+    List<MeetingDeviceVO> query(Integer qzId);
+
+    /**
+     * 保存设备
+     *
+     * @param meetingDeviceDO    会议设备
+     * @return 设备列表
+     */
+    MeetingDeviceVO save(MeetingDeviceDO meetingDeviceDO);
+
+    /**
+     * 编辑设备
+     *
+     * @param meetingDeviceDO    会议设备
+     * @return 设备列表
+     */
+    MeetingDeviceVO update(MeetingDeviceDO meetingDeviceDO);
+
+    /**
+     * 批量编辑设备
+     *
+     * @param meetingDeviceDOs    会议设备
+     * @return 设备列表
+     */
+    Integer batchUpdate(List<MeetingDeviceDO> meetingDeviceDOs);
+
+    /**
+     * 编辑设备
+     *
+     * @param id    会议设备id
+     * @return 设备列表
+     */
+    MeetingDeviceVO deleteById(String id);
+
+    int fetchMaxIndex(Integer qzId);
+}
+MeetingDeviceServiceImpl：具体实现，走的是XXXRespository。
+
+package com.yonyoucloud.ec.sns.confidential.meeting.service.impl;
+
+import com.yonyoucloud.ec.sns.confidential.meeting.data.MeetingDeviceRepository;
+import com.yonyoucloud.ec.sns.confidential.meeting.data.pojo.MeetingDeviceDO;
+import com.yonyoucloud.ec.sns.confidential.meeting.service.MeetingDeviceService;
+import com.yonyoucloud.ec.sns.confidential.meeting.service.pojo.MeetingDeviceVO;
+import com.yonyoucloud.ec.sns.error.ECIllegalArgumentException;
+import lombok.RequiredArgsConstructor;
+import org.apache.commons.lang3.StringUtils;
+import org.springframework.beans.BeanUtils;
+import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+@Service
+@RequiredArgsConstructor
+public class MeetingDeviceServiceImpl implements MeetingDeviceService {
+
+    private final MeetingDeviceRepository deviceRepository;
+
+    @Override
+    public List<MeetingDeviceVO> query(Integer qzId) {
+
+        if (null == qzId) {
+            throw new ECIllegalArgumentException("qzId could not be null");
+        }
+        List<MeetingDeviceDO> meetingDeviceDOS = deviceRepository.queryByQzId(qzId);
+        return meetingDeviceDOS.stream().map(device -> {
+            MeetingDeviceVO vo = new MeetingDeviceVO();
+            BeanUtils.copyProperties(device, vo);
+            return vo;
+        }).collect(Collectors.toList());
+    }
+
+    @Override
+    public MeetingDeviceVO save(MeetingDeviceDO meetingDeviceDO) {
+        if (null == meetingDeviceDO) {
+            throw new ECIllegalArgumentException("device could not be null");
+        }
+        MeetingDeviceDO deviceDO = deviceRepository.save(meetingDeviceDO);
+        MeetingDeviceVO vo = new MeetingDeviceVO();
+        BeanUtils.copyProperties(deviceDO, vo);
+        return vo;
+    }
+
+    @Override
+    public MeetingDeviceVO update(MeetingDeviceDO meetingDeviceDO) {
+        String id = meetingDeviceDO.getId();
+        if (StringUtils.isBlank(id)) {
+            throw new ECIllegalArgumentException("device id could not be null");
+        }
+        MeetingDeviceDO deviceDO = deviceRepository.update(meetingDeviceDO);
+        MeetingDeviceVO vo = new MeetingDeviceVO();
+        BeanUtils.copyProperties(deviceDO, vo);
+        return vo;
+    }
+
+    @Override
+    public Integer batchUpdate(List<MeetingDeviceDO> meetingDeviceDOs) {
+        meetingDeviceDOs.parallelStream().forEach(deviceRepository::updateIndex);
+        return meetingDeviceDOs.size();
+    }
+
+    @Override
+    public MeetingDeviceVO deleteById(String id) {
+        MeetingDeviceDO meetingDeviceDO = deviceRepository.deleteDevice(id);
+        MeetingDeviceVO vo = new MeetingDeviceVO();
+        BeanUtils.copyProperties(meetingDeviceDO, vo);
+        return vo;
+    }
+
+    @Override
+    public int fetchMaxIndex(Integer qzId) {
+        MeetingDeviceDO meetingDeviceDO = deviceRepository.queryMaxIndexDeviceByQzId(qzId);
+        if (null == meetingDeviceDO) {
+            return 0;
+        }
+        return meetingDeviceDO.getIndex();
+    }
+}
+
+六：surrpot（SwaggerConfig的配置类）
+
+package com.yonyoucloud.ec.sns.confidential.meeting.support;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Profile;
+import springfox.documentation.builders.ApiInfoBuilder;
+import springfox.documentation.builders.PathSelectors;
+import springfox.documentation.builders.RequestHandlerSelectors;
+import springfox.documentation.service.ApiInfo;
+import springfox.documentation.service.Contact;
+import springfox.documentation.spi.DocumentationType;
+import springfox.documentation.spring.web.plugins.Docket;
+import springfox.documentation.swagger2.annotations.EnableSwagger2;
+
+/**
+ * 
+ */
+@Configuration
+@Profile({"test","local","dev","develop"})
+@Import({springfox.documentation.spring.data.rest.configuration.SpringDataRestConfiguration.class, springfox.bean.validators.configuration.BeanValidatorPluginsConfiguration.class})
+@EnableSwagger2
+public class SwaggerConfig {
+
+    @Bean
+    public Docket mobileAPI() {
+        return new Docket(DocumentationType.SWAGGER_2)
+                .apiInfo(mobileAPIInfo())
+                .groupName("REST API")
+                .select()
+                .apis(RequestHandlerSelectors.any())
+                .paths(PathSelectors.regex("/rest/.*"))
+                .build();
+    }
+
+    private ApiInfo mobileAPIInfo() {
+        return new ApiInfoBuilder()
+                .title("Swagger文档示例")
+                .description("Swagger文档示例接口文档")
+                .contact(new Contact("刘豪", "", "liuhaoi@yonyou.com"))
+                .version("1.0.1")
+                .build();
+    }
+
+
+}
+
+七：web（config和rest）
+
+八：resources目录（下面有一个子目录sql,定义一些表操作）
+
+resources
+      ---sql
+	     xxx.js
+      ---application.yml()
+	  ---bootstrap.yml(走Springcloud配置中心的一些配置)
+	  ---ESAPI.properties(找例子复制即可)
+	  ---logback-spring.xml(找例子复制，然后在根据需要修改)
+	  ---mybatis-config.xml（mybatis相关的xml配置信息）
+	  ---validation.properties(找例子复制即可)
+
+九：最后还包括config.gradle和settings.gradle等文件，使用方式千篇一律
+
+
+
+
+
+
+
+
+
+
